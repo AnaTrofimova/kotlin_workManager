@@ -1,0 +1,201 @@
+build.gradle (Module: app):
+
+dependencies {
+    // Другие зависимости вашего проекта
+
+    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
+    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+}
+
+DataModel.kt:
+
+data class MyData(
+    val id: Int,
+    val name: String,
+    val description: String
+)
+
+ApiService.kt:
+
+import retrofit2.Call
+import retrofit2.http.GET
+
+interface ApiService {
+    @GET("data")
+    fun fetchData(): Call<List<MyData>>
+}
+
+MyApplication.kt:
+
+import android.app.Application
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+
+class MyApplication : Application() {
+
+    lateinit var apiService: ApiService
+
+    override fun onCreate() {
+        super.onCreate()
+
+        val retrofit = Retrofit.Builder()
+            .baseUrl("https://api.example.com/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+
+        apiService = retrofit.create(ApiService::class.java)
+    }
+}
+
+MyWorker.kt:
+
+import android.content.Context
+import android.util.Log
+import androidx.work.Worker
+import androidx.work.WorkerParameters
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
+
+class MyWorker(context: Context, workerParams: WorkerParameters) : Worker(context, workerParams) {
+
+    override fun doWork(): Result {
+        val apiService = (applicationContext as MyApplication).apiService
+        val call = apiService.fetchData()
+
+        call.enqueue(object : Callback<List<MyData>> {
+            override fun onResponse(call: Call<List<MyData>>, response: Response<List<MyData>>) {
+                if (response.isSuccessful) {
+                    val data = response.body()
+                    Log.d("MyWorker", "Data: $data")
+                } else {
+                    Log.e("MyWorker", "Failed to fetch data")
+                }
+            }
+
+            override fun onFailure(call: Call<List<MyData>>, t: Throwable) {
+                Log.e("MyWorker", "Network request failed", t)
+            }
+        })
+
+        return Result.success()
+    }
+}
+
+AndroidManifest.xml:
+
+<application
+    android:name=".MyApplication"
+    <!-- Остальные настройки вашего приложения -->
+    <provider
+        android:name="androidx.work.impl.WorkManagerInitializer"
+        android:authorities="${applicationId}.workmanager-init"
+        android:enabled="false"
+        android:exported="false" />
+
+    <service
+        android:name=".MyWorker"
+        android:exported="false"
+        android:permission="android.permission.BIND_JOB_SERVICE" />
+</application>
+
+activity_main.xml:
+
+<androidx.recyclerview.widget.RecyclerView
+    android:id="@+id/recyclerView"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"/>
+
+activity_main.xml:
+
+<Button
+    android:id="@+id/loadButton"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:text="Load Data"
+    android:layout_gravity="center"/>
+
+MainActivity.kt:
+
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import kotlinx.android.synthetic.main.activity_main.*
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var adapter: MyDataAdapter
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        adapter = MyDataAdapter(emptyList())
+        recyclerView.adapter = adapter
+        recyclerView.layoutManager = LinearLayoutManager(this)
+
+        loadButton.setOnClickListener {
+            loadData()
+        }
+    }
+
+    private fun loadData() {
+        val apiService = (application as MyApplication).apiService
+        val call = apiService.fetchData()
+
+        call.enqueue(object : Callback<List<MyData>> {
+            override fun onResponse(call: Call<List<MyData>>, response: Response<List<MyData>>) {
+                if (response.isSuccessful) {
+                    val data = response.body()
+                    data?.let {
+                        adapter.setData(it)
+                    }
+                }
+            }
+
+            override fun onFailure(call: Call<List<MyData>>, t: Throwable) {
+                // Обработка ошибок при загрузке данных
+            }
+        })
+    }
+}
+
+MyDataAdapter.kt:
+
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
+
+class MyDataAdapter(private var dataList: List<MyData>) : RecyclerView.Adapter<MyDataAdapter.DataViewHolder>() {
+
+    inner class DataViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val idTextView: TextView = itemView.findViewById(R.id.idTextView)
+        val nameTextView: TextView = itemView.findViewById(R.id.nameTextView)
+        val descriptionTextView: TextView = itemView.findViewById(R.id.descriptionTextView)
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DataViewHolder {
+        val itemView = LayoutInflater.from(parent.context).inflate(R.layout.item_data, parent, false)
+        return DataViewHolder(itemView)
+    }
+
+    override fun onBindViewHolder(holder: DataViewHolder, position: Int) {
+        val currentItem = dataList[position]
+        holder.idTextView.text = currentItem.id.toString()
+        holder.nameTextView.text = currentItem.name
+        holder.descriptionTextView.text = currentItem.description
+    }
+
+    override fun getItemCount() = dataList.size
+
+    fun setData(data: List<MyData>) {
+        dataList = data
+        notifyDataSetChanged()
+    }
+}
